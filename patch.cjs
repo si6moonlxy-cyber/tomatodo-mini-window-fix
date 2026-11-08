@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 'use strict';
 /*
- * tomatodo-mini-window-patch · main tool
- * 给 番茄ToDo（TomaToDo，Electron）的 app.asar 注入 setBounds 防御垫。
+ * tomatodo-mini-window-patch · main tool (v1.1.0)
+ * 修复番茄ToDo 桌面版两类问题：
+ *   A) 拖动迷你小窗时主进程崩溃（setBounds guard）
+ *   B) 停止/提前完成时记录丢失、界面卡在「专注中」（Date[...]() 修复 + 渲染进程兜底）
  *
  * 用法：
  *   node patch.cjs --asar "D:\app\TomaToDo\resources\app.asar"   应用（自动备份）
@@ -18,8 +20,17 @@ const asar = require('@electron/asar');
 
 const ROOT = __dirname;
 const GUARD_PATH = path.join(ROOT, 'patch', 'guard.js');
-const MARKER = 'TOMATODO_PATCH_GUARD_MARKER_V1';
+const RENDERER_FIX_PATH = path.join(ROOT, 'patch', 'renderer-fix.js');
+const MARKER = 'TOMATODO_PATCH_MARKER_V2';
+const GUARD_MARKER = '__TOMATO_MIN_SETBOUNDS_GUARD__';
 const DEFAULT_ASAR = process.env.TOMATODO_ASAR || 'D:\\app\\TomaToDo\\resources\\app.asar';
+
+// 混淆代码里解码失败的 Date.now 调用（修复后记录才能保存）
+const DATE_FIXES = [
+  ['Date[_0x4e3760(0x3d6,0x402)]', 'Date.now'],
+  ['Date[_0xb861bd(a0_0x36b9ab._0x34a475,0x7f)]', 'Date.now'],
+];
+const DATE_FIX_FILE = path.join('js', 'pages', 'page-timer-record.js');
 
 function usage() {
   console.log([
@@ -64,55 +75,113 @@ function readMainFromAsar(asarPath) {
   }
 }
 
+function buildInstaller(rendererFixSrc) {
+  return [
+    '/* tomatodo-mini-window-patch · renderer fix installer */',
+    '(function () {',
+    '  try {',
+    '    var electron = require("electron");',
+    '    var app = electron && electron.app;',
+    '    if (!app) return;',
+    '    var src = ' + JSON.stringify(rendererFixSrc) + ';',
+    '    app.on("browser-window-created", function (ev, win) {',
+    '      try {',
+    '        win.webContents.on("did-finish-load", function () {',
+    '          win.webContents.executeJavaScript(src).catch(function () {});',
+    '        });',
+    '      } catch (e) {}',
+    '    });',
+    '  } catch (e) {}',
+    '})();',
+  ].join('\n');
+}
+
+function fixDateCalls(tmp, log) {
+  const file = path.join(tmp, DATE_FIX_FILE);
+  if (!fs.existsSync(file)) {
+    throw new Error('找不到渲染进程文件: ' + DATE_FIX_FILE);
+  }
+  let s = fs.readFileSync(file, 'utf8');
+  let total = 0;
+  for (const [from, to] of DATE_FIXES) {
+    const n = s.split(from).length - 1;
+    if (n > 0) {
+      s = s.split(from).join(to);
+      total += n;
+      log('[fix] ' + DATE_FIX_FILE + ' 替换 ' + n + ' 处: ' + from + ' -> ' + to);
+    }
+  }
+  if (total === 0) {
+    throw new Error('没有找到需要修复的 Date[...]() 调用（版本不匹配？）');
+  }
+  fs.writeFileSync(file, s, 'utf8');
+  return total;
+}
+
 async function apply(asarPath, { dryRun }) {
   if (!dryRun && readMainFromAsar(asarPath).includes(MARKER)) {
-    console.log('[skip] 该 app.asar 已经打过补丁（找到标记）。如需重打，请先 --restore。');
+    console.log('[skip] 该 app.asar 已经打过 v1.1.0 补丁（找到标记）。如需重打，请先 --restore。');
     return;
   }
   const guard = fs.readFileSync(GUARD_PATH, 'utf8');
+  const rendererFix = fs.readFileSync(RENDERER_FIX_PATH, 'utf8');
   const ts = stamp();
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tomatodo-mini-window-patch-'));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tomatodo-patch-'));
   const outAsar = dryRun
     ? path.join(ROOT, 'tmp', 'app.asar.patched-' + ts + '.asar')
     : asarPath + '.new-' + ts;
+  const log = (m) => console.log(m);
 
   try {
     if (!dryRun) {
       const backup = asarPath + '.bak-' + ts;
       fs.copyFileSync(asarPath, backup);
-      console.log('[backup] 原文件已备份:', backup);
+      log('[backup] 原文件已备份: ' + backup);
     } else {
-      console.log('[dry-run] 不会修改原文件');
+      log('[dry-run] 不会修改原文件');
     }
 
-    console.log('[unpack] 解包到:', tmp);
+    log('[unpack] 解包到: ' + tmp);
     asar.extractAll(asarPath, tmp);
 
+    // 1) renderer: fix broken Date[...]() calls
+    fixDateCalls(tmp, log);
+
+    // 2) main.js: setBounds guard + renderer fix installer
     const mainPath = path.join(tmp, 'main.js');
     const original = fs.readFileSync(mainPath, 'utf8');
-    const next = '/* tomatodo-mini-window-patch v1.0.0 | ' + MARKER + ' */\n' + guard + '\n' + original;
+    const next =
+      '/* tomatodo-mini-window-patch v1.1.0 | ' + MARKER + ' */\n' +
+      guard + '\n' +
+      buildInstaller(rendererFix) + '\n' +
+      original;
     fs.writeFileSync(mainPath, next, 'utf8');
-    console.log('[inject] main.js 头部已注入防御垫，长度:', original.length, '->', next.length);
+    log('[inject] main.js 头部已注入 guard + renderer 修复安装器，长度: ' + original.length + ' -> ' + next.length);
 
     if (dryRun) fs.mkdirSync(path.join(ROOT, 'tmp'), { recursive: true });
-    console.log('[pack] 正在重新打包 asar...');
+    log('[pack] 正在重新打包 asar...');
     await asar.createPackage(tmp, outAsar);
 
-    const check = asar.extractFile(outAsar, 'main.js').toString('utf8');
-    if (!check.includes(MARKER)) throw new Error('打包校验失败：新 asar 的 main.js 不含补丁标记');
-    if (!check.includes('setBounds')) throw new Error('打包校验失败：注入内容异常');
+    // 3) verify
+    const checkMain = asar.extractFile(outAsar, 'main.js').toString('utf8');
+    if (!checkMain.includes(MARKER)) throw new Error('打包校验失败：main.js 不含补丁标记');
+    if (!checkMain.includes(GUARD_MARKER)) throw new Error('打包校验失败：main.js 不含 setBounds guard');
+    for (const [from] of DATE_FIXES) {
+      if (checkMain.includes(from)) throw new Error('打包校验失败：Date 修复未生效');
+    }
     const files = asar.listPackage(outAsar);
     const hasMain = files.some((f) => f.replace(/[\\/]+/g, '/').replace(/^\/+/, '') === 'main.js');
-    if (!hasMain) throw new Error('打包校验失败：新 asar 缺少 main.js');
-    console.log('[check] 新 asar 校验通过（条目数:', files.length, '）');
+    const hasRecord = files.some((f) => f.replace(/[\\/]+/g, '/').replace(/^\/+/, '') === 'js/pages/page-timer-record.js');
+    if (!hasMain || !hasRecord) throw new Error('打包校验失败：缺少 main.js 或 page-timer-record.js');
+    log('[check] 新 asar 校验通过（条目数: ' + files.length + '）');
 
     if (dryRun) {
-      console.log('[dry-run] 产物已保存:', outAsar);
-      console.log('[dry-run] 未替换原文件。');
+      log('[dry-run] 产物已保存: ' + outAsar);
+      log('[dry-run] 未替换原文件。');
     } else {
       fs.copyFileSync(outAsar, asarPath);
-      console.log('[apply] 已替换:', asarPath);
-      console.log('[apply] 如遇异常，运行 node patch.cjs --restore 回滚。');
+      log('[apply] 已替换: ' + asarPath);
+      log('[apply] 如遇异常，运行 node patch.cjs --restore 回滚。');
       try { fs.unlinkSync(outAsar); } catch (e) {}
     }
   } finally {

@@ -4,12 +4,10 @@
 
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey.svg)]()
 [![Node.js](https://img.shields.io/badge/node.js-18%2B-blue.svg)](https://nodejs.org/)
-[![Version](https://img.shields.io/badge/version-v1.0.0-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-v1.1.0-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-修复番茄ToDo 桌面版（TomaToDo，Electron）拖动「迷你小窗」时主进程崩溃弹框的问题。
-
-Fix the 番茄ToDo (TomaToDo) desktop crash when dragging the mini window.
+修复番茄ToDo 桌面版（TomaToDo，Electron）的两类问题：拖动「迷你小窗」时主进程崩溃；停止/提前完成后记录丢失、界面卡在「专注中」、记录不同步手机。
 
 > 非官方补丁，与番茄ToDo 官方无关。修改 `app.asar` 有一定风险，请先备份、自行评估。
 
@@ -17,7 +15,13 @@ Fix the 番茄ToDo (TomaToDo) desktop crash when dragging the mini window.
 
 ## 为什么需要它
 
-番茄ToDo 桌面版拖动「迷你小窗」时，主进程会弹出：
+番茄ToDo 桌面版（实测 1.7.6）有两个会直接影响使用的问题，官方没有提供开关，逻辑又埋在 `app.asar` 里，所以只能用补丁从主进程 / 渲染进程侧兜住。
+
+## 它在修什么
+
+### 1. 拖动迷你小窗时主进程崩溃（v1.0.0）
+
+拖动「迷你小窗」时弹出：
 
 ```
 A JavaScript error occurred in the main process
@@ -25,48 +29,49 @@ A JavaScript error occurred in the main process
 Uncaught Exception:
 TypeError: Error processing argument at index 0, conversion failure from
     at BrowserWindow.setBounds (node:electron/js2c/browser_init:2:8972)
-    at Timeout._onTimeout (...\app.asar\main.js:1:211663)
 ```
 
-这个弹窗会打断使用，关掉后应用还在，但每次拖小窗都可能复现。官方没有提供开关，小程序逻辑又埋在 `app.asar` 里，所以只能用补丁从主进程侧兜住。
+**根因**：小窗展开/收起动画每 16ms 调用一次 `BrowserWindow.setBounds`，与用户拖动抢同一个窗口；拖动起始的那一帧动画仍会调用 `setBounds`，Electron 在窗口正被拖动时拒绝执行并抛错，主进程未捕获 → 崩溃弹框。
 
-## 它在修什么
+### 2. 停止/提前完成后记录丢失、界面卡住、不同步（v1.1.0）
 
-主进程的「小窗口展开 / 收起动画」每 16ms 调用一次 `BrowserWindow.setBounds` 来移动窗口。拖动时动画与系统拖窗抢同一个窗口；代码里虽然有「动画中检测到用户移动窗口就停止」的 2px 容差保护，但拖动起始存在窗口期，动画那一帧仍会调用 `setBounds` —— Electron 在窗口正被拖动的状态下拒绝执行并抛 `conversion failure`，主进程未捕获异常，于是弹框。
+点「停止 → 提前完成」后：时间停住了，但界面仍显示「专注中」、按钮状态不变、**记录没有写进数据库**，手机端自然也收不到。
 
-> 注：最初怀疑是 NaN / 非整数参数，但实测拦截日志显示——**参数归一化后仍然被原生拒绝**，所以问题不只是数值，本质是「窗口状态 + 调用时机」的竞态。
+**根因**：`js/pages/page-timer-record.js` 里 `saveRecordOnly` 第一行是混淆后的 `Date[...]()`（本应是 `Date.now`），运行时解码失败抛 `Uncaught TypeError`，导致 `doStopTimer` 后半段（写记录、复位界面、清状态）全部被跳过。
+
+**修复**：
+- 把两处坏掉的 `Date[...]()` 调用替换为 `Date.now()`；
+- 给 `saveRecordOnly` 加兜底：失败时手动构造记录写入数据库，并触发云同步 / 手机同步；
+- 给 `doStopTimer` 加安全网：任何一步抛错都会强制复位计时状态与界面，不会卡在「专注中」。
 
 ## 补丁做了什么
 
 | 情况 | 处理 |
 | --- | --- |
-| 参数不是对象 | 忽略并记录日志 |
-| x / y / width / height 是 NaN、undefined 或非数值 | 回退到当前窗口的对应值 |
-| 小数 | 四舍五入 |
-| 宽 / 高 ≤ 0 | 修正为 1 |
-| 原生 `setBounds` 意外抛错 | 吞掉并记录日志 |
+| 小窗 `setBounds` 参数非法 / 原生拒绝 | 参数归一化 + 异常吞掉并记录 |
+| `saveRecordOnly` 中 `Date[...]()` 抛错 | 替换为 `Date.now()`；失败时走兜底写记录 |
+| `doStopTimer` 中途抛错 | `finally` 中强制复位状态与界面 |
+| 记录写入成功 | 触发云同步 `uploadRecentRecordsToCloud` 与手机直连 `syncRecordToPhoneAsync` |
 
-正常调用行为完全不变；被拦截的记录写在 `%TEMP%\tomatodo-mini-window-patch.log`。
+正常调用行为不变；被拦截/兜底的记录写入控制台，必要时可查 DevTools。
 
 ## 工作原理
 
 ```
-用户拖动迷你小窗
+用户点「停止 → 提前完成」
         │
         ▼
-小窗展开/收起动画（每 16ms 一帧）
-        │  BrowserWindow.setBounds({x, y, width, height})
+doStopTimer（渲染进程）
+        │  clearTimerUiInterval / timer:stop（主进程停表）
         ▼
-setBounds 防御垫（patch/guard.js，注入在 main.js 最前面）
-        │  参数归一化：NaN/undefined 回退、小数取整、宽高 ≥ 1
+saveRecordOnly
+        │  Date.now() 正常 → 构造记录 → db:addRecord
+        │  旧代码：Date[...]() 解码失败 → 抛错 → doStopTimer 中断（bug）
         ▼
-原生 BrowserWindow.setBounds
-        │  窗口正被拖动时 Electron 拒绝执行并抛错
+addRecord 成功 → uploadRecentRecordsToCloud（云同步）
+        │          → syncRecordToPhoneAsync（手机直连，需已连接）
         ▼
-异常被 try/catch 吞掉 + 写日志
-        │
-        ▼
-主进程不再崩溃（弹框消失）
+doStopTimer 收尾：TimerCoreState 复位 → updateView() 回到空闲
 ```
 
 ## 环境要求
@@ -87,7 +92,7 @@ npm install
 ## 使用
 
 ```powershell
-# 1. 先完全退出 番茄ToDo（托盘右键退出，或 taskkill /IM TomaToDo.exe /F）
+# 1. 先完全退出 番茄ToDo（托盘右键退出，或 taskkill /IM TomaToDo.exe /T /F）
 
 # 2. 预览：只生成打好补丁的 asar 到 tmp/，不替换原文件
 node patch.cjs --dry-run
@@ -112,9 +117,16 @@ node patch.cjs --restore
 
 ## 验证
 
-1. 重新启动 番茄ToDo；
-2. 打开 `%TEMP%\tomatodo-mini-window-patch.log`，应出现 `已安装 setBounds 防御垫`；
-3. 拖动迷你小窗，不再弹出 JavaScript error 弹框。
+**1. 小窗崩溃（v1.0.0）**
+
+- 拖动迷你小窗，不再弹出 JavaScript error 弹框。
+
+**2. 停止/提前完成（v1.1.0）**
+
+- 停止后界面回到空闲，按钮状态复位；
+- `%APPDATA%\tomatodo\tomatodo_db.json` 的 `PCRecord` 里出现新记录；
+- 控制台出现 `db:addRecord -> {"success":true}` 与 `[CloudSync] 专注记录上传成功`；
+- 手机端登录同一账号并刷新后可见记录。
 
 ## 常见问题
 
@@ -127,32 +139,33 @@ node patch.cjs --restore
 **Mac / Linux 能用吗？**
 脚本按 Windows 路径编写；其他平台把 `--asar` 指向对应路径理论上可用，但未实测。
 
-**会丢数据吗？**
-不会。补丁只动 `app.asar`，不碰 `%APPDATA%\tomatodo` 里的待办与计时数据。
+**手机端还是收不到记录？**
+PC 端云同步需要账号已绑定且为会员；手机直连需要 PC 端「连接手机」在同 WiFi 下扫码。先确认记录已写入本地库，再看云同步 / 直连两条通道。
 
-**为什么不在官方仓库修？**
-补丁是第三方行为，官方包无法直接提交修改；这里只动本机副本，不动官方分发文件。
+**小于 5 分钟的专注为什么不能提前完成？**
+应用把「不足 5 秒」的计时设计为静默丢弃（防误触）。但如果开始时间变量丢失，任何时长都可能被误判为短时——这属于应用缺陷，后续版本会修。
 
 ## 已知限制
 
-- 只治「崩溃」，不治「动画与拖动抢窗口」的观感问题；
+- 只修「崩溃 / 记录丢失 / 界面卡住」，不修小窗动画与拖动抢窗口的观感问题；
 - 应用升级会覆盖 `app.asar`，需重跑补丁；
-- 仅针对 `BrowserWindow.setBounds`，不覆盖其他 API 的类似崩溃；
-- 若目标构建开启了 `EnableEmbeddedAsarIntegrityValidation`，修改会被拒绝。
+- 若目标构建开启了 `EnableEmbeddedAsarIntegrityValidation`，修改会被拒绝；
+- 短计时（<5 秒）仍按应用原设计丢弃。
 
 ## 安全与回滚
 
 - 替换前自动备份 `app.asar` 到同目录 `app.asar.bak-<时间戳>`；
 - `--dry-run` 可先预览产物，不触碰原文件；
 - 出问题执行 `node patch.cjs --restore`，或手动把备份改回 `app.asar`；
-- 只修改 `main.js` 文件头部的注入块，不改动官方业务代码。
+- 只注入 guard / 修复安装器，并修改一处混淆调用，不改动官方业务代码。
 
 ## 目录结构
 
 ```
 tomatodo-mini-window-fix/
 ├── patch.cjs              # 入口：解包 → 注入 → 重打包 → 备份/回滚
-├── patch/guard.js         # 注入到 main.js 的 setBounds 防御垫
+├── patch/guard.js         # setBounds 防御垫（注入 main.js）
+├── patch/renderer-fix.js  # 渲染进程兜底（记录保存 / 界面复位）
 ├── test/guard.test.cjs    # 单测（mock BrowserWindow，不依赖 Electron）
 ├── tools/fuse-check.cjs   # 检查目标是否开启 asar 完整性校验
 ├── README.md              # 简体中文（本文件）

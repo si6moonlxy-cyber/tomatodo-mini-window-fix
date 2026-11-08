@@ -1,8 +1,8 @@
 {
   "name": "tomatodo-mini-window-patch",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
-  "description": "番茄ToDo (TomaToDo) 迷你小窗拖动崩溃的第三方防御补丁：为 app.asar 注入 BrowserWindow.setBounds 防御垫",
+  "description": "番茄ToDo (TomaToDo) 第三方修复补丁：迷你小窗拖动崩溃、停止计时记录丢失/界面卡住",
   "type": "commonjs",
   "bin": {
     "tomatodo-patch": "./patch.cjs"

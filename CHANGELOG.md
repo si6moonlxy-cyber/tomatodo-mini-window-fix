@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0] - 2026-11-08
+
+### Fixed
+
+- 停止/提前完成后界面卡在「专注中」、按钮状态不复位。
+- 停止/提前完成后专注记录没有写入数据库（`saveRecordOnly` 中 `Date[...]()` 抛错导致 `doStopTimer` 中断）。
+- 因记录未写入导致的手机端不同步。
+
+### Added
+
+- `patch/renderer-fix.js`：渲染进程兜底（记录兜底保存 + `doStopTimer` 安全网），随补丁注入。
+- `patch.cjs` 支持替换 `page-timer-record.js` 中两处坏掉的 `Date[...]()` 调用。
+
 ## [1.0.0] - 2026-11-08
 
 ### Fixed
