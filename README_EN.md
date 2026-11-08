@@ -7,7 +7,7 @@ English | [简体中文](README.md)
 [![Version](https://img.shields.io/badge/version-v1.1.0-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Fixes two issues in the 番茄ToDo (TomaToDo) desktop app: crashing the main process when dragging the mini window, and losing records / freezing the UI / failing to sync when stopping or finishing a focus session early.
+Fixes three issues in the 番茄ToDo (TomaToDo) desktop app: crashing the main process when dragging the mini window, losing records / freezing the UI / failing to sync when stopping or finishing a focus session early, and the tray-icon setting not taking effect.
 
 > Unofficial patch, not affiliated with 番茄ToDo. Modifying `app.asar` carries risk — back it up first and evaluate at your own discretion.
 
@@ -15,7 +15,7 @@ Fixes two issues in the 番茄ToDo (TomaToDo) desktop app: crashing the main pro
 
 ## Why this exists
 
-The desktop app (tested on 1.7.6) has two problems that directly affect usage. There is no official switch for either, and the logic is buried inside `app.asar`, so a main-process / renderer-side patch is the only practical route.
+The desktop app (tested on 1.7.6) has three problems that directly affect usage. There is no official switch for either, and the logic is buried inside `app.asar`, so a main-process / renderer-side patch is the only practical route.
 
 ## What it fixes
 
@@ -44,6 +44,14 @@ After 「停止 → 提前完成」: the timer stops, but the UI stays on 「专
 - Add a fallback for `saveRecordOnly`: build the record manually, write it via `db:addRecord`, then trigger cloud / phone sync;
 - Add a safety net for `doStopTimer`: any thrown error forces a timer-state and UI reset, so it never freezes on 「专注中」.
 
+### 3. Tray-icon setting does not take effect (v1.1.0)
+
+Switching 「托盘图标」 from 「显示计时分钟数」 to 「仅显示图标」 appears to do nothing (most visible while a focus session is running).
+
+**Root cause**: `updateWindowsTrayIcon` short-circuits when `currentTrayState.mode === mode`. Switching the setting does not change `mode` — only the icon content — so the function returns early and the tray is never repainted.
+
+**Fix**: intercept `settings:setWindowsTrayIconMode`, clear the tray state cache after the setting is saved, and force `updateWindowsTrayIcon` to repaint.
+
 ## What the patch does
 
 | Case | Handling |
@@ -52,6 +60,7 @@ After 「停止 → 提前完成」: the timer stops, but the UI stays on 「专
 | `Date[...]()` throws inside `saveRecordOnly` | replaced with `Date.now()`; fallback saves the record |
 | `doStopTimer` throws mid-way | forced state + UI reset in `finally` |
 | Record saved | triggers `uploadRecentRecordsToCloud` and `syncRecordToPhoneAsync` |
+| Tray-icon setting changed | clears tray state cache and forces a repaint |
 
 Normal calls behave as before; intercepted / fallback writes are logged to the console.
 
@@ -127,6 +136,10 @@ Environment variable `TOMATODO_ASAR` overrides the default path.
 - A new entry appears in `PCRecord` inside `%APPDATA%\tomatodo\tomatodo_db.json`;
 - Console shows `db:addRecord -> {"success":true}` and `[CloudSync] 专注记录上传成功`;
 - The phone shows the record after logging into the same account and refreshing.
+
+**3. Tray icon (v1.1.0)**
+
+- While a focus session is running, switch 「托盘图标」 between 「显示计时分钟数」 and 「仅显示图标」 — the tray icon updates immediately.
 
 ## FAQ
 

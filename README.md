@@ -7,7 +7,7 @@
 [![Version](https://img.shields.io/badge/version-v1.1.0-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-修复番茄ToDo 桌面版（TomaToDo，Electron）的两类问题：拖动「迷你小窗」时主进程崩溃；停止/提前完成后记录丢失、界面卡在「专注中」、记录不同步手机。
+修复番茄ToDo 桌面版（TomaToDo，Electron）的三类问题：拖动「迷你小窗」时主进程崩溃；停止/提前完成后记录丢失、界面卡在「专注中」、记录不同步手机；托盘「仅显示图标」切换不生效。
 
 > 非官方补丁，与番茄ToDo 官方无关。修改 `app.asar` 有一定风险，请先备份、自行评估。
 
@@ -15,7 +15,7 @@
 
 ## 为什么需要它
 
-番茄ToDo 桌面版（实测 1.7.6）有两个会直接影响使用的问题，官方没有提供开关，逻辑又埋在 `app.asar` 里，所以只能用补丁从主进程 / 渲染进程侧兜住。
+番茄ToDo 桌面版（实测 1.7.6）有三个会直接影响使用的问题，官方没有提供开关，逻辑又埋在 `app.asar` 里，所以只能用补丁从主进程 / 渲染进程侧兜住。
 
 ## 它在修什么
 
@@ -44,6 +44,14 @@ TypeError: Error processing argument at index 0, conversion failure from
 - 给 `saveRecordOnly` 加兜底：失败时手动构造记录写入数据库，并触发云同步 / 手机同步；
 - 给 `doStopTimer` 加安全网：任何一步抛错都会强制复位计时状态与界面，不会卡在「专注中」。
 
+### 3. 托盘「仅显示图标」切换不生效（v1.1.0）
+
+设置里把「托盘图标」从「显示计时分钟数」切到「仅显示图标」，托盘图标看起来没有变化（计时进行中尤其明显）。
+
+**根因**：`updateWindowsTrayIcon` 里有个缓存短路——`currentTrayState.mode === mode` 时直接 `return`。切换设置时 `mode` 没变，只是图标内容变了，于是函数提前返回，托盘不重绘。
+
+**修复**：拦截 `settings:setWindowsTrayIconMode`，设置完成后清掉托盘状态缓存并强制调用 `updateWindowsTrayIcon` 重绘。
+
 ## 补丁做了什么
 
 | 情况 | 处理 |
@@ -52,6 +60,7 @@ TypeError: Error processing argument at index 0, conversion failure from
 | `saveRecordOnly` 中 `Date[...]()` 抛错 | 替换为 `Date.now()`；失败时走兜底写记录 |
 | `doStopTimer` 中途抛错 | `finally` 中强制复位状态与界面 |
 | 记录写入成功 | 触发云同步 `uploadRecentRecordsToCloud` 与手机直连 `syncRecordToPhoneAsync` |
+| 切换「托盘图标」设置 | 清掉托盘状态缓存并强制重绘，图标立即变化 |
 
 正常调用行为不变；被拦截/兜底的记录写入控制台，必要时可查 DevTools。
 
@@ -127,6 +136,10 @@ node patch.cjs --restore
 - `%APPDATA%\tomatodo\tomatodo_db.json` 的 `PCRecord` 里出现新记录；
 - 控制台出现 `db:addRecord -> {"success":true}` 与 `[CloudSync] 专注记录上传成功`；
 - 手机端登录同一账号并刷新后可见记录。
+
+**3. 托盘图标（v1.1.0）**
+
+- 计时进行中，设置 → 托盘图标 → 在「显示计时分钟数」与「仅显示图标」之间切换，托盘图标立即变化。
 
 ## 常见问题
 
