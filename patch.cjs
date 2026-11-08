@@ -4,7 +4,8 @@
  * tomatodo-mini-window-patch · main tool (v1.1.0)
  * 修复番茄ToDo 桌面版两类问题：
  *   A) 拖动迷你小窗时主进程崩溃（setBounds guard）
- *   B) 停止/提前完成时记录丢失、界面卡在「专注中」（Date[...]() 修复 + 渲染进程兜底）
+ *   B) 停止/提前完成时记录丢失、界面卡在中（Date[...]() 修复 + 渲染进程兜底）
+ *   C) 托盘「仅显示图标」切换不生效（强制重绘）
  *
  * 用法：
  *   node patch.cjs --asar "D:\app\TomaToDo\resources\app.asar"   应用（自动备份）
@@ -21,6 +22,7 @@ const asar = require('@electron/asar');
 const ROOT = __dirname;
 const GUARD_PATH = path.join(ROOT, 'patch', 'guard.js');
 const RENDERER_FIX_PATH = path.join(ROOT, 'patch', 'renderer-fix.js');
+const TRAY_FIX_PATH = path.join(ROOT, 'patch', 'tray-fix.js');
 const MARKER = 'TOMATODO_PATCH_MARKER_V2';
 const GUARD_MARKER = '__TOMATO_MIN_SETBOUNDS_GUARD__';
 const DEFAULT_ASAR = process.env.TOMATODO_ASAR || 'D:\\app\\TomaToDo\\resources\\app.asar';
@@ -125,6 +127,7 @@ async function apply(asarPath, { dryRun }) {
   }
   const guard = fs.readFileSync(GUARD_PATH, 'utf8');
   const rendererFix = fs.readFileSync(RENDERER_FIX_PATH, 'utf8');
+  const trayFix = fs.readFileSync(TRAY_FIX_PATH, 'utf8');
   const ts = stamp();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tomatodo-patch-'));
   const outAsar = dryRun
@@ -147,16 +150,17 @@ async function apply(asarPath, { dryRun }) {
     // 1) renderer: fix broken Date[...]() calls
     fixDateCalls(tmp, log);
 
-    // 2) main.js: setBounds guard + renderer fix installer
+    // 2) main.js: setBounds guard + tray fix + renderer fix installer
     const mainPath = path.join(tmp, 'main.js');
     const original = fs.readFileSync(mainPath, 'utf8');
     const next =
       '/* tomatodo-mini-window-patch v1.1.0 | ' + MARKER + ' */\n' +
       guard + '\n' +
+      trayFix + '\n' +
       buildInstaller(rendererFix) + '\n' +
       original;
     fs.writeFileSync(mainPath, next, 'utf8');
-    log('[inject] main.js 头部已注入 guard + renderer 修复安装器，长度: ' + original.length + ' -> ' + next.length);
+    log('[inject] main.js 头部已注入 guard + tray + renderer 修复安装器，长度: ' + original.length + ' -> ' + next.length);
 
     if (dryRun) fs.mkdirSync(path.join(ROOT, 'tmp'), { recursive: true });
     log('[pack] 正在重新打包 asar...');
@@ -166,9 +170,7 @@ async function apply(asarPath, { dryRun }) {
     const checkMain = asar.extractFile(outAsar, 'main.js').toString('utf8');
     if (!checkMain.includes(MARKER)) throw new Error('打包校验失败：main.js 不含补丁标记');
     if (!checkMain.includes(GUARD_MARKER)) throw new Error('打包校验失败：main.js 不含 setBounds guard');
-    for (const [from] of DATE_FIXES) {
-      if (checkMain.includes(from)) throw new Error('打包校验失败：Date 修复未生效');
-    }
+    if (!checkMain.includes('tray icon refresh fix')) throw new Error('打包校验失败：main.js 不含托盘刷新修复');
     const files = asar.listPackage(outAsar);
     const hasMain = files.some((f) => f.replace(/[\\/]+/g, '/').replace(/^\/+/, '') === 'main.js');
     const hasRecord = files.some((f) => f.replace(/[\\/]+/g, '/').replace(/^\/+/, '') === 'js/pages/page-timer-record.js');

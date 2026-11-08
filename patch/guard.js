@@ -83,6 +83,29 @@
     } catch (e) {
       proto.setBounds = setBoundsSafe;
     }
+
+    // 迷你小窗折叠/展开动画修复：
+    // 折叠前 setMaximumSize(168x132) 会把宽度锁死 → 宽度瞬间从 332 跳到 168（闪烁）；
+    // 展开前 setMinimumSize(169x132) 又比折叠后的 168 多 1px → 再跳一次。
+    // 在 mini 高度下放宽宽度限制，让 setSize 的宽度插值能正常生效。
+    try {
+      var oMin = proto.setMinimumSize;
+      var oMax = proto.setMaximumSize;
+      var isMiniH = function (h) { return h === 132 || h === 100; };
+      if (typeof oMin === 'function') {
+        proto.setMinimumSize = function (w, h) {
+          if (isMiniH(h)) { w = 0; h = 0; }
+          return oMin.call(this, w, h);
+        };
+      }
+      if (typeof oMax === 'function') {
+        proto.setMaximumSize = function (w, h) {
+          if (isMiniH(h)) { w = 332; h = 0x7fffffff; }
+          return oMax.call(this, w, h);
+        };
+      }
+    } catch (e2) {}
+
     log('已安装 setBounds 防御垫');
   } catch (e) {
     log('注入失败: ' + (e && e.message));
