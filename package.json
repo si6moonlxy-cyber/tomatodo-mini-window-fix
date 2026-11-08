@@ -1,0 +1,20 @@
+{
+  "name": "tomatodo-mini-window-patch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "番茄ToDo (TomaToDo) 迷你小窗拖动崩溃的第三方防御补丁：为 app.asar 注入 BrowserWindow.setBounds 防御垫",
+  "type": "commonjs",
+  "bin": {
+    "tomatodo-patch": "./patch.cjs"
+  },
+  "scripts": {
+    "test": "node test/guard.test.cjs",
+    "patch": "node patch.cjs",
+    "restore": "node patch.cjs --restore",
+    "dry-run": "node patch.cjs --dry-run"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@electron/asar": "3.2.10"
+  }
+}
