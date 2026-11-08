@@ -77,7 +77,7 @@ Main process no longer crashes (dialog gone)
 ## Install
 
 ```powershell
-git clone https://github.com/sigmoonlxy-cyber/tomatodo-mini-window-fix
+git clone https://github.com/si6moonlxy-cyber/tomatodo-mini-window-fix
 cd tomatodo-mini-window-fix
 npm install
 ```

@@ -79,7 +79,7 @@ setBounds 防御垫（patch/guard.js，注入在 main.js 最前面）
 ## 安装
 
 ```powershell
-git clone https://github.com/sigmoonlxy-cyber/tomatodo-mini-window-fix
+git clone https://github.com/si6moonlxy-cyber/tomatodo-mini-window-fix
 cd tomatodo-mini-window-fix
 npm install
 ```
