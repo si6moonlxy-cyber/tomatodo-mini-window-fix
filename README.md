@@ -4,10 +4,10 @@
 
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey.svg)]()
 [![Node.js](https://img.shields.io/badge/node.js-18%2B-blue.svg)](https://nodejs.org/)
-[![Version](https://img.shields.io/badge/version-v1.1.0-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-v1.1.1-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-修复番茄ToDo 桌面版（TomaToDo，Electron）的三类问题：拖动「迷你小窗」时主进程崩溃；停止/提前完成后记录丢失、界面卡在「专注中」、记录不同步手机；托盘「仅显示图标」切换不生效。
+修复番茄ToDo 桌面版（TomaToDo，Electron）的四类问题：拖动「迷你小窗」时主进程崩溃；停止/提前完成后记录丢失、界面卡在「专注中」、记录不同步手机；托盘「仅显示图标」切换不生效；全屏视频下窗口置顶失效。
 
 > 非官方补丁，与番茄ToDo 官方无关。修改 `app.asar` 有一定风险，请先备份、自行评估。
 
@@ -15,7 +15,7 @@
 
 ## 为什么需要它
 
-番茄ToDo 桌面版（实测 1.7.6）有三个会直接影响使用的问题，官方没有提供开关，逻辑又埋在 `app.asar` 里，所以只能用补丁从主进程 / 渲染进程侧兜住。
+番茄ToDo 桌面版（实测 1.7.6）有四个会直接影响使用的问题，官方没有提供开关，逻辑又埋在 `app.asar` 里，所以只能用补丁从主进程 / 渲染进程侧兜住。
 
 ## 它在修什么
 
@@ -52,6 +52,14 @@ TypeError: Error processing argument at index 0, conversion failure from
 
 **修复**：拦截 `settings:setWindowsTrayIconMode`，设置完成后清掉托盘状态缓存并强制调用 `updateWindowsTrayIcon` 重绘。
 
+### 4. 全屏视频下窗口置顶失效（v1.1.1）
+
+在浏览器/播放器「窗口化全屏」播放视频时，点击番茄ToDo 悬浮窗后，悬浮窗会被全屏窗口盖住（沉底）。
+
+**根因**：Windows 的 z-order 行为——全屏窗口获得前台后，普通 `HWND_TOPMOST` 窗口可能被盖住；应用自身没有取消置顶（日志确认点击时没有 `setAlwaysOnTop(false)`）。
+
+**修复**：包装 `BrowserWindow.prototype.setAlwaysOnTop`，置顶开启期间每 500ms 重新置顶一次，点击被盖住后最多 0.5 秒自动弹回最前。
+
 ## 补丁做了什么
 
 | 情况 | 处理 |
@@ -61,6 +69,7 @@ TypeError: Error processing argument at index 0, conversion failure from
 | `doStopTimer` 中途抛错 | `finally` 中强制复位状态与界面 |
 | 记录写入成功 | 触发云同步 `uploadRecentRecordsToCloud` 与手机直连 `syncRecordToPhoneAsync` |
 | 切换「托盘图标」设置 | 清掉托盘状态缓存并强制重绘，图标立即变化 |
+| 窗口置顶开启期间 | 每 500ms 重新置顶，防止被全屏窗口盖住 |
 
 正常调用行为不变；被拦截/兜底的记录写入控制台，必要时可查 DevTools。
 
@@ -140,6 +149,10 @@ node patch.cjs --restore
 **3. 托盘图标（v1.1.0）**
 
 - 计时进行中，设置 → 托盘图标 → 在「显示计时分钟数」与「仅显示图标」之间切换，托盘图标立即变化。
+
+**4. 窗口置顶（v1.1.1）**
+
+- 开启「窗口置顶」，浏览器/播放器窗口化全屏播放视频，点击悬浮窗后应在约 0.5 秒内回到最前。
 
 ## 常见问题
 

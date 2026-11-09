@@ -4,10 +4,10 @@ English | [简体中文](README.md)
 
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011-lightgrey.svg)]()
 [![Node.js](https://img.shields.io/badge/node.js-18%2B-blue.svg)](https://nodejs.org/)
-[![Version](https://img.shields.io/badge/version-v1.1.0-orange.svg)]()
+[![Version](https://img.shields.io/badge/version-v1.1.1-orange.svg)]()
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Fixes three issues in the 番茄ToDo (TomaToDo) desktop app: crashing the main process when dragging the mini window, losing records / freezing the UI / failing to sync when stopping or finishing a focus session early, and the tray-icon setting not taking effect.
+Fixes four issues in the 番茄ToDo (TomaToDo) desktop app: crashing the main process when dragging the mini window, losing records / freezing the UI / failing to sync when stopping or finishing a focus session early, the tray-icon setting not taking effect, and the window losing always-on-top over a fullscreen video.
 
 > Unofficial patch, not affiliated with 番茄ToDo. Modifying `app.asar` carries risk — back it up first and evaluate at your own discretion.
 
@@ -15,7 +15,7 @@ Fixes three issues in the 番茄ToDo (TomaToDo) desktop app: crashing the main p
 
 ## Why this exists
 
-The desktop app (tested on 1.7.6) has three problems that directly affect usage. There is no official switch for either, and the logic is buried inside `app.asar`, so a main-process / renderer-side patch is the only practical route.
+The desktop app (tested on 1.7.6) has four problems that directly affect usage. There is no official switch for either, and the logic is buried inside `app.asar`, so a main-process / renderer-side patch is the only practical route.
 
 ## What it fixes
 
@@ -52,6 +52,14 @@ Switching 「托盘图标」 from 「显示计时分钟数」 to 「仅显示图
 
 **Fix**: intercept `settings:setWindowsTrayIconMode`, clear the tray state cache after the setting is saved, and force `updateWindowsTrayIcon` to repaint.
 
+### 4. Always-on-top lost over a fullscreen video (v1.1.1)
+
+While a browser/player plays a windowed-fullscreen video, clicking the mini window sends it behind the video.
+
+**Root cause**: Windows z-order — a fullscreen foreground window can cover a regular `HWND_TOPMOST` window; the app does not cancel always-on-top itself (verified: no `setAlwaysOnTop(false)` on click).
+
+**Fix**: wrap `BrowserWindow.prototype.setAlwaysOnTop` and re-apply the topmost flag every 500 ms while it is enabled, so the window pops back within ~0.5 s.
+
 ## What the patch does
 
 | Case | Handling |
@@ -61,6 +69,7 @@ Switching 「托盘图标」 from 「显示计时分钟数」 to 「仅显示图
 | `doStopTimer` throws mid-way | forced state + UI reset in `finally` |
 | Record saved | triggers `uploadRecentRecordsToCloud` and `syncRecordToPhoneAsync` |
 | Tray-icon setting changed | clears tray state cache and forces a repaint |
+| Always-on-top enabled | re-applies topmost every 500 ms, preventing fullscreen windows from covering it |
 
 Normal calls behave as before; intercepted / fallback writes are logged to the console.
 
@@ -140,6 +149,10 @@ Environment variable `TOMATODO_ASAR` overrides the default path.
 **3. Tray icon (v1.1.0)**
 
 - While a focus session is running, switch 「托盘图标」 between 「显示计时分钟数」 and 「仅显示图标」 — the tray icon updates immediately.
+
+**4. Always-on-top (v1.1.1)**
+
+- Enable 「窗口置顶」, play a windowed-fullscreen video, click the mini window — it should pop back to the front within ~0.5 s.
 
 ## FAQ
 

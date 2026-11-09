@@ -1,8 +1,8 @@
 {
   "name": "tomatodo-mini-window-patch",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
-  "description": "番茄ToDo (TomaToDo) 第三方修复补丁：迷你小窗拖动崩溃、停止计时记录丢失/界面卡住",
+  "description": "番茄ToDo (TomaToDo) 第三方修复补丁：迷你小窗拖动崩溃、停止计时记录丢失/界面卡住、托盘切换、全屏视频置顶失效",
   "type": "commonjs",
   "bin": {
     "tomatodo-patch": "./patch.cjs"

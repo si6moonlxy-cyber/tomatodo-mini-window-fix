@@ -23,6 +23,7 @@ const ROOT = __dirname;
 const GUARD_PATH = path.join(ROOT, 'patch', 'guard.js');
 const RENDERER_FIX_PATH = path.join(ROOT, 'patch', 'renderer-fix.js');
 const TRAY_FIX_PATH = path.join(ROOT, 'patch', 'tray-fix.js');
+const TOP_KEEPER_PATH = path.join(ROOT, 'patch', 'top-keeper.js');
 const MARKER = 'TOMATODO_PATCH_MARKER_V2';
 const GUARD_MARKER = '__TOMATO_MIN_SETBOUNDS_GUARD__';
 const DEFAULT_ASAR = process.env.TOMATODO_ASAR || 'D:\\app\\TomaToDo\\resources\\app.asar';
@@ -128,6 +129,7 @@ async function apply(asarPath, { dryRun }) {
   const guard = fs.readFileSync(GUARD_PATH, 'utf8');
   const rendererFix = fs.readFileSync(RENDERER_FIX_PATH, 'utf8');
   const trayFix = fs.readFileSync(TRAY_FIX_PATH, 'utf8');
+  const topKeeper = fs.readFileSync(TOP_KEEPER_PATH, 'utf8');
   const ts = stamp();
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'tomatodo-patch-'));
   const outAsar = dryRun
@@ -157,6 +159,7 @@ async function apply(asarPath, { dryRun }) {
       '/* tomatodo-mini-window-patch v1.1.0 | ' + MARKER + ' */\n' +
       guard + '\n' +
       trayFix + '\n' +
+      topKeeper + '\n' +
       buildInstaller(rendererFix) + '\n' +
       original;
     fs.writeFileSync(mainPath, next, 'utf8');
@@ -171,6 +174,7 @@ async function apply(asarPath, { dryRun }) {
     if (!checkMain.includes(MARKER)) throw new Error('打包校验失败：main.js 不含补丁标记');
     if (!checkMain.includes(GUARD_MARKER)) throw new Error('打包校验失败：main.js 不含 setBounds guard');
     if (!checkMain.includes('tray icon refresh fix')) throw new Error('打包校验失败：main.js 不含托盘刷新修复');
+    if (!checkMain.includes('always-on-top keeper')) throw new Error('打包校验失败：main.js 不含置顶保持修复');
     const files = asar.listPackage(outAsar);
     const hasMain = files.some((f) => f.replace(/[\\/]+/g, '/').replace(/^\/+/, '') === 'main.js');
     const hasRecord = files.some((f) => f.replace(/[\\/]+/g, '/').replace(/^\/+/, '') === 'js/pages/page-timer-record.js');
